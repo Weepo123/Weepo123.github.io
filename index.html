@@ -8,189 +8,155 @@
     form > label { display:inline-block; width: 90px; }
     input[type=range] { vertical-align: middle; }
     input[type=number] { width: 4em; margin-left: 0.5em; }
-
-    .preview-area {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-      margin-top: 1em;
-    }
-    .preview-box {
-      flex: 1 1 300px;
-      border: 1px solid #ccc;
-      position: relative;
-      background: #fafafa;
-      min-height: 300px;
-    }
-    .preview-box canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-
-    #output {
-      width: 100%;
-      box-sizing: border-box;
-      margin-top: 1em;
-      font-family: monospace;
-    }
-    button { margin-right: 0.5em; }
+    .preview-area { display:flex; gap:1rem; margin-top:1em; }
+    .preview-box { flex:1; border:1px solid #ccc; background:#fafafa; min-height:300px; position:relative; }
+    .preview-box canvas { width:100%; height:100%; display:block; }
+    #output { width:100%; box-sizing:border-box; margin-top:1em; font-family:monospace; }
+    button { margin-right:0.5em; }
   </style>
 </head>
 <body>
   <h1>Desmos Bézier Exporter (Client-Side)</h1>
 
   <form id="uploadForm">
-    <label for="image">Image:</label>
-    <input id="image" name="image" type="file" accept="image/*" required><br><br>
-
-    <label for="threshold">Threshold:</label>
-    <input id="threshold" name="threshold" type="range" min="0" max="255" value="128">
-    <input id="thresholdNum" type="number" min="0" max="255" value="128"><br><br>
-
-    <label for="minLength">Min Length:</label>
-    <input id="minLength" name="minLength" type="range" min="0" max="500" value="0">
-    <input id="minLengthNum" type="number" min="0" max="500" value="0"><br><br>
-
-    <label for="maxLength">Max Length:</label>
-    <input id="maxLength" name="maxLength" type="range" min="0" max="2000" value="1000">
-    <input id="maxLengthNum" type="number" min="0" max="2000" value="1000"><br><br>
-
+    <!-- ... your inputs for image, threshold, min/max length ... -->
     <button id="previewBtn" type="button">Preview</button>
     <button id="convertBtn" type="button">Convert</button>
   </form>
 
   <div class="preview-area">
-    <div class="preview-box">
-      <canvas id="origCanvas"></canvas>
-    </div>
-    <div class="preview-box">
-      <canvas id="prevCanvas"></canvas>
-    </div>
+    <div class="preview-box"><canvas id="origCanvas"></canvas></div>
+    <div class="preview-box"><canvas id="prevCanvas"></canvas></div>
   </div>
 
   <h2>Desmos Functions</h2>
-  <textarea id="output" rows="10" readonly placeholder="Converted Bézier segments will appear here…"></textarea>
+  <textarea id="output" rows="10" readonly></textarea>
 
   <script type="module">
-    // Import and initialize ESM Potrace WASM (client-side) :contentReference[oaicite:0]{index=0}
-    import { potrace, init } from 'https://esm.sh/esm-potrace-wasm@0.4.1';
+    import { init, potrace } from 'esm-potrace-wasm';
 
+    // 1) Initialize the WASM once up front
     await init();
 
-    const form         = document.getElementById('uploadForm');
-    const fileInput    = form.elements.image;
-    const thrRange     = form.elements.threshold;
-    const thrNum       = document.getElementById('thresholdNum');
-    const minRange     = form.elements.minLength;
-    const minNum       = document.getElementById('minLengthNum');
-    const maxRange     = form.elements.maxLength;
-    const maxNum       = document.getElementById('maxLengthNum');
-    const previewBtn   = document.getElementById('previewBtn');
-    const convertBtn   = document.getElementById('convertBtn');
-    const origCanvas   = document.getElementById('origCanvas');
-    const prevCanvas   = document.getElementById('prevCanvas');
-    const outputTa     = document.getElementById('output');
-    const origCtx      = origCanvas.getContext('2d');
-    const prevCtx      = prevCanvas.getContext('2d');
+    // 2) Grab all DOM refs
+    const form       = document.getElementById('uploadForm');
+    const fileInput  = form.elements.image;
+    const thrRange   = form.elements.threshold;
+    const thrNum     = document.getElementById('thresholdNum');
+    const minRange   = form.elements.minLength;
+    const minNum     = document.getElementById('minLengthNum');
+    const maxRange   = form.elements.maxLength;
+    const maxNum     = document.getElementById('maxLengthNum');
+    const previewBtn = document.getElementById('previewBtn');
+    const convertBtn = document.getElementById('convertBtn');
+    const origCanvas = document.getElementById('origCanvas');
+    const prevCanvas = document.getElementById('prevCanvas');
+    const outputTa   = document.getElementById('output');
+    const origCtx    = origCanvas.getContext('2d');
+    const prevCtx    = prevCanvas.getContext('2d');
 
-    // Sync sliders & number inputs
-    [[thrRange, thrNum],[minRange,minNum],[maxRange,maxNum]].forEach(([r,n])=>{
-      r.addEventListener('input', ()=> n.value = r.value);
-      n.addEventListener('input', ()=> r.value = n.value);
-    });
+    // 3) Sync sliders ↔ number inputs
+    [[thrRange,thrNum],[minRange,minNum],[maxRange,maxNum]]
+      .forEach(([r,n])=>{
+        r.addEventListener('input', ()=> n.value = r.value);
+        n.addEventListener('input', ()=> r.value = n.value);
+      });
 
-    // Load chosen image into origCanvas
-    fileInput.addEventListener('change', e => {
+    // 4) Load the image into the left canvas
+    fileInput.addEventListener('change', e=>{
       const file = e.target.files[0];
       if (!file) return;
       const img = new Image();
-      img.onload = () => {
-        origCanvas.width  = img.width;
+      img.onload = ()=>{
+        origCanvas.width = img.width;
         origCanvas.height = img.height;
-        prevCanvas.width  = img.width;
+        prevCanvas.width = img.width;
         prevCanvas.height = img.height;
-        origCtx.drawImage(img, 0, 0);
-        prevCtx.clearRect(0, 0, prevCanvas.width, prevCanvas.height);
+        origCtx.drawImage(img,0,0);
+        prevCtx.clearRect(0,0,prevCanvas.width,prevCanvas.height);
         outputTa.value = '';
       };
       img.src = URL.createObjectURL(file);
     });
 
-    // Helper: produce a binary-thresholded canvas copy
+    // 5) Helpers
     function getBinaryCanvas() {
       const w = origCanvas.width, h = origCanvas.height;
-      const imgData = origCtx.getImageData(0, 0, w, h);
-      const buf     = imgData.data;
-      const t       = +thrRange.value;
-      for (let i = 0; i < buf.length; i += 4) {
-        const lum = 0.299*buf[i] + 0.587*buf[i+1] + 0.114*buf[i+2];
+      const data = origCtx.getImageData(0,0,w,h);
+      const t    = +thrRange.value;
+      for (let i=0; i<data.data.length; i+=4) {
+        const lum = 0.299*data.data[i]
+                  + 0.587*data.data[i+1]
+                  + 0.114*data.data[i+2];
         const b   = lum < t ? 0 : 255;
-        buf[i] = buf[i+1] = buf[i+2] = b;
-        buf[i+3] = 255;
+        data.data[i] = data.data[i+1] = data.data[i+2] = b;
       }
       const tmp = document.createElement('canvas');
       tmp.width = w; tmp.height = h;
-      tmp.getContext('2d').putImageData(imgData, 0, 0);
+      tmp.getContext('2d').putImageData(data,0,0);
+      return tmp;
+    }
+    function scaleCanvas(source, maxDim=800) {
+      const { width:w, height:h } = source;
+      const ratio = Math.min(maxDim/w, maxDim/h, 1);
+      if (ratio === 1) return source;
+      const tmp = document.createElement('canvas');
+      tmp.width = w * ratio;
+      tmp.height = h * ratio;
+      tmp.getContext('2d')
+         .drawImage(source, 0, 0, tmp.width, tmp.height);
       return tmp;
     }
 
-    // Preview: trace & draw vector result
-    previewBtn.addEventListener('click', async () => {
+    // 6) Preview handler
+    previewBtn.addEventListener('click', async ()=>{
       previewBtn.disabled = true;
       try {
-        const binCanvas = getBinaryCanvas();
-        const svgString = await potrace(binCanvas, { pathonly: true });
-        // Draw SVG path onto prevCanvas
-        prevCtx.clearRect(0,0,prevCanvas.width, prevCanvas.height);
+        let bin = getBinaryCanvas();
+        bin = scaleCanvas(bin, 800);
+        const svg = await potrace(bin, { pathonly: true });
         const doc = new DOMParser()
-                      .parseFromString(svgString, 'image/svg+xml');
-        const pathD = doc.querySelector('path').getAttribute('d');
-        prevCtx.stroke(new Path2D(pathD));
+                      .parseFromString(svg,'image/svg+xml');
+        const d   = doc.querySelector('path').getAttribute('d');
+
+        prevCtx.clearRect(0,0,prevCanvas.width,prevCanvas.height);
+        prevCtx.stroke(new Path2D(d));
       } catch (err) {
-        alert('Preview failed: ' + err);
+        alert('Preview failed: '+ err);
       } finally {
         previewBtn.disabled = false;
       }
     });
 
-    // Convert: extract cubic‐Bezier segments and emit Desmos functions
-    convertBtn.addEventListener('click', async () => {
+    // 7) Convert handler
+    convertBtn.addEventListener('click', async ()=>{
       convertBtn.disabled = true;
       try {
-        const binCanvas = getBinaryCanvas();
-        const svgString = await potrace(binCanvas, { pathonly: true });
-        const doc       = new DOMParser()
-                              .parseFromString(svgString, 'image/svg+xml');
-        const d         = doc.querySelector('path').getAttribute('d');
+        let bin = getBinaryCanvas();
+        bin = scaleCanvas(bin, 800);
+        const svg = await potrace(bin, { pathonly: true });
+        const doc = new DOMParser()
+                      .parseFromString(svg,'image/svg+xml');
+        const d   = doc.querySelector('path').getAttribute('d');
 
-        // Parse successive C commands, track start/end points
         const segs = [];
-        let prevX = 0, prevY = 0;
-        const mMatch = /^M\s*([\d.]+)[ ,]([\d.]+)/.exec(d);
-        if (mMatch) {
-          prevX = +mMatch[1];
-          prevY = +mMatch[2];
-        }
+        let [prevX, prevY] = /^M\s*([\d.]+)[ ,]([\d.]+)/.exec(d)?.slice(1).map(Number) || [0,0];
         const re = /C\s*([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)/g;
         let m;
-        while ((m = re.exec(d)) !== null) {
-          const [ , x1, y1, x2, y2, x3, y3 ] = m.map((v,i) => i>0 ? +v : v);
-          const x0 = prevX, y0 = prevY;
-          // Apply length filtering
-          const len = Math.hypot(x3-x0, y3-y0);
+        while (m = re.exec(d)) {
+          const [ , x1,y1,x2,y2,x3,y3 ] = m.map((v,i)=> i>0?+v:v);
+          const len = Math.hypot(x3-prevX, y3-prevY);
           if (len >= +minRange.value && len <= +maxRange.value) {
             segs.push(
-              `((1-t)**3*${x0} + 3*(1-t)**2*t*${x1} + 3*(1-t)*t**2*${x2} + t**3*${x3}, ` +
-              `(1-t)**3*${y0} + 3*(1-t)**2*t*${y1} + 3*(1-t)*t**2*${y2} + t**3*${y3}) \left\{0 \le t \le 1\right\}`
+              `((1-t)**3*${prevX} + 3*(1-t)**2*t*${x1} + 3*(1-t)*t**2*${x2} + t**3*${x3}, `+
+              `(1-t)**3*${prevY} + 3*(1-t)**2*t*${y1} + 3*(1-t)*t**2*${y2} + t**3*${y3}) \left\{0 \le t \le 1\right\}"`
             );
           }
-          prevX = +x3; prevY = +y3;
+          prevX = x3; prevY = y3;
         }
         outputTa.value = segs.join('\n');
-
       } catch (err) {
-        alert('Conversion failed: ' + err);
+        alert('Conversion failed: '+ err);
       } finally {
         convertBtn.disabled = false;
       }
