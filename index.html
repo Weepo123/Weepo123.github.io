@@ -9,7 +9,7 @@
     input[type=range] { vertical-align: middle; }
     input[type=number] { width: 4em; margin-left: 0.5em; }
     .preview-area { display:flex; gap:1rem; margin-top:1em; }
-    .preview-box { flex:1; border:1px solid #ccc; background:#fafafa; min-height:300px; position:relative; }
+    .preview-box { flex:1; border:1px solid #ccc; background:#fafafa; min-height:300px; }
     .preview-box canvas { width:100%; height:100%; display:block; }
     #output { width:100%; box-sizing:border-box; margin-top:1em; font-family:monospace; }
     button { margin-right:0.5em; }
@@ -19,7 +19,21 @@
   <h1>Desmos Bézier Exporter (Client-Side)</h1>
 
   <form id="uploadForm">
-    <!-- ... your inputs for image, threshold, min/max length ... -->
+    <label for="image">Image:</label>
+    <input id="image" name="image" type="file" accept="image/*" required><br><br>
+
+    <label for="threshold">Threshold:</label>
+    <input id="threshold" name="threshold" type="range" min="0" max="255" value="128">
+    <input id="thresholdNum" type="number" min="0" max="255" value="128"><br><br>
+
+    <label for="minLength">Min Length:</label>
+    <input id="minLength" name="minLength" type="range" min="0" max="500" value="0">
+    <input id="minLengthNum" type="number" min="0" max="500" value="0"><br><br>
+
+    <label for="maxLength">Max Length:</label>
+    <input id="maxLength" name="maxLength" type="range" min="0" max="2000" value="1000">
+    <input id="maxLengthNum" type="number" min="0" max="2000" value="1000"><br><br>
+
     <button id="previewBtn" type="button">Preview</button>
     <button id="convertBtn" type="button">Convert</button>
   </form>
@@ -30,15 +44,15 @@
   </div>
 
   <h2>Desmos Functions</h2>
-  <textarea id="output" rows="10" readonly></textarea>
+  <textarea id="output" rows="10" readonly placeholder="Converted Bézier segments will appear here…"></textarea>
 
   <script type="module">
     import { init, potrace } from 'esm-potrace-wasm';
 
-    // 1) Initialize the WASM once up front
+    // 1) One-time initialization
     await init();
 
-    // 2) Grab all DOM refs
+    // 2) DOM refs
     const form       = document.getElementById('uploadForm');
     const fileInput  = form.elements.image;
     const thrRange   = form.elements.threshold;
@@ -62,7 +76,7 @@
         n.addEventListener('input', ()=> r.value = n.value);
       });
 
-    // 4) Load the image into the left canvas
+    // 4) Load image into left canvas
     fileInput.addEventListener('change', e=>{
       const file = e.target.files[0];
       if (!file) return;
@@ -108,35 +122,32 @@
       return tmp;
     }
 
-    // 6) Preview handler
+    // 6) Preview
     previewBtn.addEventListener('click', async ()=>{
       previewBtn.disabled = true;
       try {
         let bin = getBinaryCanvas();
-        bin = scaleCanvas(bin, 800);
+        bin = scaleCanvas(bin,800);
         const svg = await potrace(bin, { pathonly: true });
-        const doc = new DOMParser()
-                      .parseFromString(svg,'image/svg+xml');
+        const doc = new DOMParser().parseFromString(svg,'image/svg+xml');
         const d   = doc.querySelector('path').getAttribute('d');
-
         prevCtx.clearRect(0,0,prevCanvas.width,prevCanvas.height);
         prevCtx.stroke(new Path2D(d));
       } catch (err) {
-        alert('Preview failed: '+ err);
+        alert('Preview failed: ' + err);
       } finally {
         previewBtn.disabled = false;
       }
     });
 
-    // 7) Convert handler
+    // 7) Convert
     convertBtn.addEventListener('click', async ()=>{
       convertBtn.disabled = true;
       try {
         let bin = getBinaryCanvas();
-        bin = scaleCanvas(bin, 800);
+        bin = scaleCanvas(bin,800);
         const svg = await potrace(bin, { pathonly: true });
-        const doc = new DOMParser()
-                      .parseFromString(svg,'image/svg+xml');
+        const doc = new DOMParser().parseFromString(svg,'image/svg+xml');
         const d   = doc.querySelector('path').getAttribute('d');
 
         const segs = [];
@@ -156,7 +167,7 @@
         }
         outputTa.value = segs.join('\n');
       } catch (err) {
-        alert('Conversion failed: '+ err);
+        alert('Conversion failed: ' + err);
       } finally {
         convertBtn.disabled = false;
       }
