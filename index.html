@@ -129,7 +129,10 @@
       try {
         let bin = getBinaryCanvas();
         bin     = scaleCanvas(bin, 800);
-
+        // Debug: show the mask in the left canvas for a moment
+        // ← Debug line: paint the mask so you can see it
+        origCtx.clearRect(0, 0, origCanvas.width, origCanvas.height);
+        origCtx.drawImage(bin, 0, 0);
         const svg = await potrace(bin, { pathonly: true });
         const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
         const pathEl = doc.querySelector('path');
