@@ -129,11 +129,11 @@
       try {
         let bin = getBinaryCanvas();
         bin     = scaleCanvas(bin, 800);
-        // Debug: show the mask in the left canvas for a moment
-        // ← Debug line: paint the mask so you can see it
-        origCtx.clearRect(0, 0, origCanvas.width, origCanvas.height);
-        origCtx.drawImage(bin, 0, 0);
-        const svg = await potrace(bin, { pathonly: true });
+        const imgData = bin
+          .getContext('2d')
+          .getImageData(0, 0, bin.width, bin.height);
+
+        const svg = await potrace(imgData, { pathonly: true });
         const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
         const pathEl = doc.querySelector('path');
 
@@ -156,12 +156,13 @@
     convertBtn.addEventListener('click', async ()=>{
       convertBtn.disabled = true;
       try {
-        // 1) Create + scale the binary mask
         let bin = getBinaryCanvas();
         bin     = scaleCanvas(bin, 800);
+        const imgData = bin
+          .getContext('2d')
+          .getImageData(0, 0, bin.width, bin.height);
 
-        // 2) Run potrace → SVG
-        const svg = await potrace(bin, { pathonly: true });
+        const svg = await potrace(imgData, { pathonly: true });
         const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
         const pathEl = doc.querySelector('path');
 
