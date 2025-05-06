@@ -1,6 +1,7 @@
 Flask
+flask-cors
 opencv-python
 numpy
 potrace
 matplotlib
-flask-cors
+gunicorn
