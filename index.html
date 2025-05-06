@@ -5,38 +5,42 @@
     <title>Bitmap to Bézier Curves Web App</title>
     <style>
         body { font-family: sans-serif; padding: 1em; }
-        .controls { display: flex; flex-wrap: wrap; gap: 1em; margin-bottom: 1em; }
+        .controls { display: flex; flex-wrap: wrap; gap: 1em; margin-bottom: 1em; align-items: flex-end; }
         .controls label { display: flex; flex-direction: column; font-size: 0.9em; }
         .controls input[type="range"] { width: 200px; }
-        #fileInput { align-self: flex-end; }
-        .container { display: flex; gap: 2em; }
-        canvas { border: 1px solid #ccc; }
+        .controls button, .controls input[type="file"] { height: 2em; }
+        .container { display: flex; gap: 2em; flex-wrap: wrap; }
+        .canvas-box { display: flex; flex-direction: column; align-items: center; }
+        .canvas-box canvas { border: 1px solid #ccc; max-width: 600px; height: auto; }
         #output { width: 100%; height: 8em; box-sizing: border-box; font-family: monospace; margin-top: 1em; }
     </style>
+    <!-- include Potrace.js from CDN -->
+    <script src="https://unpkg.com/potrace@3.1.0/dist/potrace.min.js"></script>
 </head>
 <body>
     <div class="controls">
+        <input type="file" id="fileInput" accept="image/*">
         <label>
             Threshold: <strong><span id="thresholdVal">128</span></strong>
             <input type="range" id="threshold" min="0" max="255" value="128">
         </label>
         <label>
             Min Length: <strong><span id="minLenVal">0</span></strong>
-            <input type="range" id="minLen" min="0" max="100" value="0">
+            <input type="range" id="minLen" min="0" max="500" value="0">
         </label>
         <label>
-            Max Length: <strong><span id="maxLenVal">100</span></strong>
-            <input type="range" id="maxLen" min="0" max="1000" value="100">
+            Max Length: <strong><span id="maxLenVal">1000</span></strong>
+            <input type="range" id="maxLen" min="0" max="2000" value="1000">
         </label>
+        <button id="previewBtn">Preview</button>
         <button id="generate">Generate Functions</button>
-        <input type="file" id="fileInput" accept="image/*">
     </div>
     <div class="container">
-        <div>
+        <div class="canvas-box">
             <h3>Original Image</h3>
             <canvas id="originalCanvas" width="400" height="400"></canvas>
         </div>
-        <div>
+        <div class="canvas-box">
             <h3>Preview Output</h3>
             <canvas id="previewCanvas" width="400" height="400"></canvas>
         </div>
@@ -48,14 +52,15 @@
         const fileInput = document.getElementById('fileInput');
         const origCanvas = document.getElementById('originalCanvas');
         const prevCanvas = document.getElementById('previewCanvas');
-        const threshSlider = document.getElementById('threshold');
-        const minLenSlider = document.getElementById('minLen');
-        const maxLenSlider = document.getElementById('maxLen');
+        const threshold = document.getElementById('threshold');
+        const minLen = document.getElementById('minLen');
+        const maxLen = document.getElementById('maxLen');
         const thresholdVal = document.getElementById('thresholdVal');
         const minLenVal = document.getElementById('minLenVal');
         const maxLenVal = document.getElementById('maxLenVal');
-        const outputArea = document.getElementById('output');
+        const previewBtn = document.getElementById('previewBtn');
         const generateBtn = document.getElementById('generate');
+        const outputArea = document.getElementById('output');
 
         const origCtx = origCanvas.getContext('2d');
         const prevCtx = prevCanvas.getContext('2d');
@@ -72,40 +77,76 @@
                     prevCanvas.width = img.width;
                     prevCanvas.height = img.height;
                     origCtx.drawImage(img, 0, 0);
-                    updatePreview();
+                    prevCtx.clearRect(0, 0, prevCanvas.width, prevCanvas.height);
                 };
                 img.src = evt.target.result;
             };
             reader.readAsDataURL(file);
         });
 
-        threshSlider.addEventListener('input', () => {
-            thresholdVal.textContent = threshSlider.value;
-            updatePreview();
-        });
-        minLenSlider.addEventListener('input', () => {
-            minLenVal.textContent = minLenSlider.value;
-        });
-        maxLenSlider.addEventListener('input', () => {
-            maxLenVal.textContent = maxLenSlider.value;
-        });
+        threshold.addEventListener('input', () => thresholdVal.textContent = threshold.value);
+        minLen.addEventListener('input', () => minLenVal.textContent = minLen.value);
+        maxLen.addEventListener('input', () => maxLenVal.textContent = maxLen.value);
 
-        function updatePreview() {
+        previewBtn.addEventListener('click', () => {
+            if (!img.src) return;
             const w = origCanvas.width, h = origCanvas.height;
-            const imgData = origCtx.getImageData(0, 0, w, h);
-            const data = imgData.data;
+            const imageData = origCtx.getImageData(0, 0, w, h);
+            const data = imageData.data;
             for (let i = 0; i < data.length; i += 4) {
                 const gray = (data[i] + data[i+1] + data[i+2]) / 3;
-                const val = gray < threshSlider.value ? 0 : 255;
+                const val = gray < threshold.value ? 0 : 255;
                 data[i] = data[i+1] = data[i+2] = val;
             }
-            prevCtx.putImageData(imgData, 0, 0);
-        }
+            prevCtx.putImageData(imageData, 0, 0);
+        });
 
         generateBtn.addEventListener('click', () => {
-            // TODO: Integrate a vectorization library (e.g., Potrace.js) to extract Bézier curves
-            // and filter by min/max length. Then convert each curve to Desmos-compatible parametric functions.
-            outputArea.value = 'Function generation not implemented yet.';
+            if (!img.src) return;
+            const w = prevCanvas.width, h = prevCanvas.height;
+            // grab binary pixel data from preview canvas
+            const imgData = prevCtx.getImageData(0, 0, w, h).data;
+            const bin = new Uint8Array(w * h);
+            for (let i = 0; i < w * h; i++) {
+                // treat black (0) as 1, white (255) as 0
+                bin[i] = imgData[i*4] === 0 ? 1 : 0;
+            }
+            // vectorize with Potrace
+            const bitmap = Potrace.Bitmap.fromArray(bin, w);
+            const tracer = new Potrace();
+            tracer.loadBitmap(bitmap);
+            tracer.process();
+            const paths = tracer.getPathList();
+
+            const minLenValNum = Number(minLen.value);
+            const maxLenValNum = Number(maxLen.value);
+            const funcs = [];
+
+            paths.forEach(path => {
+                let [x0, y0] = path.curve.start;
+                path.curve.beziers.forEach(b => {
+                    const [x1, y1, x2, y2, x3, y3] = b;
+                    // approximate length as straight-line
+                    const dx = x3 - x0;
+                    const dy = y3 - y0;
+                    const length = Math.hypot(dx, dy);
+                    if (length >= minLenValNum && length <= maxLenValNum) {
+                        const px = [x0, x1, x2, x3];
+                        const py = [y0, y1, y2, y3];
+                        funcs.push({ px, py });
+                    }
+                    x0 = x3; y0 = y3; // move start for next bezier
+                });
+            });
+
+            // build Desmos parametric functions
+            const lines = funcs.map((f, i) => {
+                const xExpr = `(${f.px[0]}*(1-t)^3+3*${f.px[1]}*t*(1-t)^2+3*${f.px[2]}*t^2*(1-t)+${f.px[3]}*t^3)`;
+                const yExpr = `(${f.py[0]}*(1-t)^3+3*${f.py[1]}*t*(1-t)^2+3*${f.py[2]}*t^2*(1-t)+${f.py[3]}*t^3)`;
+                return `\{x(t)=${xExpr}, y(t)=${yExpr}, 0\<=t<=1\}`;
+            });
+
+            outputArea.value = lines.join('\n');
         });
     </script>
 </body>
