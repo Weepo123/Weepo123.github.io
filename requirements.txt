@@ -1,4 +1,6 @@
-opencv-python-headless
+Flask
+opencv-python
 numpy
 potrace
 matplotlib
+flask-cors
