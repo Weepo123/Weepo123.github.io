@@ -2,6 +2,6 @@ Flask
 flask-cors
 opencv-python
 numpy
-pypotrace
+potracer
 matplotlib
 gunicorn
