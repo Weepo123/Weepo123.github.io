@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Desmos Bézier Exporter (with Preview)</title>
+  <meta charset="UTF-8">
+  <title>Desmos Bézier Exporter (Client-Side)</title>
   <style>
     body { font-family: sans-serif; margin: 1em; }
-    .controls { margin-bottom: 1em; }
+    form > label { display:inline-block; width: 90px; }
+    input[type=range] { vertical-align: middle; }
+    input[type=number] { width: 4em; margin-left: 0.5em; }
+
     .preview-area {
       display: flex;
       gap: 1rem;
@@ -16,172 +18,182 @@
     .preview-box {
       flex: 1 1 300px;
       border: 1px solid #ccc;
-      min-height: 300px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      position: relative;
       background: #fafafa;
-      padding: 0.5em;
-      box-sizing: border-box;
+      min-height: 300px;
     }
     .preview-box canvas {
-      flex: 1;
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-    }
-    .preview-box label {
-      margin-top: 0.5em;
-      font-weight: bold;
-    }
-    textarea {
       width: 100%;
-      height: 10em;
-      font-family: monospace;
-      margin-top: 1em;
+      height: 100%;
+      display: block;
     }
+
+    #output {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 1em;
+      font-family: monospace;
+    }
+    button { margin-right: 0.5em; }
   </style>
 </head>
 <body>
-  <h1>Desmos Bézier Exporter</h1>
+  <h1>Desmos Bézier Exporter (Client-Side)</h1>
 
-  <div class="controls">
-    <input type="file" id="image" accept="image/*"><br>
-    <label>
-      Threshold:
-      <input type="range" id="threshold" min="0" max="255" value="128">
-      <span id="threshVal">128</span>
-    </label>
-    <button id="convert">Convert</button>
-  </div>
+  <form id="uploadForm">
+    <label for="image">Image:</label>
+    <input id="image" name="image" type="file" accept="image/*" required><br><br>
+
+    <label for="threshold">Threshold:</label>
+    <input id="threshold" name="threshold" type="range" min="0" max="255" value="128">
+    <input id="thresholdNum" type="number" min="0" max="255" value="128"><br><br>
+
+    <label for="minLength">Min Length:</label>
+    <input id="minLength" name="minLength" type="range" min="0" max="500" value="0">
+    <input id="minLengthNum" type="number" min="0" max="500" value="0"><br><br>
+
+    <label for="maxLength">Max Length:</label>
+    <input id="maxLength" name="maxLength" type="range" min="0" max="2000" value="1000">
+    <input id="maxLengthNum" type="number" min="0" max="2000" value="1000"><br><br>
+
+    <button id="previewBtn" type="button">Preview</button>
+    <button id="convertBtn" type="button">Convert</button>
+  </form>
 
   <div class="preview-area">
     <div class="preview-box">
       <canvas id="origCanvas"></canvas>
-      <label>Original</label>
     </div>
     <div class="preview-box">
-      <canvas id="maskCanvas"></canvas>
-      <label>Binarized Preview</label>
-    </div>
-    <div class="preview-box">
-      <canvas id="svgCanvas"></canvas>
-      <label>Vector Preview</label>
+      <canvas id="prevCanvas"></canvas>
     </div>
   </div>
 
   <h2>Desmos Functions</h2>
-  <textarea id="output" readonly></textarea>
+  <textarea id="output" rows="10" readonly placeholder="Converted Bézier segments will appear here…"></textarea>
 
   <script type="module">
-    import Potrace from 'https://cdn.skypack.dev/potrace-wasm';
+    // Import and initialize ESM Potrace WASM (client-side) :contentReference[oaicite:0]{index=0}
+    import { potrace, init } from 'https://esm.sh/esm-potrace-wasm@0.4.1';
 
-    const imgInput   = document.getElementById('image');
-    const threshCtrl = document.getElementById('threshold');
-    const threshVal  = document.getElementById('threshVal');
-    const btn        = document.getElementById('convert');
+    await init();
 
-    const origCan    = document.getElementById('origCanvas');
-    const maskCan    = document.getElementById('maskCanvas');
-    const svgCan     = document.getElementById('svgCanvas');
-    const outTA      = document.getElementById('output');
+    const form         = document.getElementById('uploadForm');
+    const fileInput    = form.elements.image;
+    const thrRange     = form.elements.threshold;
+    const thrNum       = document.getElementById('thresholdNum');
+    const minRange     = form.elements.minLength;
+    const minNum       = document.getElementById('minLengthNum');
+    const maxRange     = form.elements.maxLength;
+    const maxNum       = document.getElementById('maxLengthNum');
+    const previewBtn   = document.getElementById('previewBtn');
+    const convertBtn   = document.getElementById('convertBtn');
+    const origCanvas   = document.getElementById('origCanvas');
+    const prevCanvas   = document.getElementById('prevCanvas');
+    const outputTa     = document.getElementById('output');
+    const origCtx      = origCanvas.getContext('2d');
+    const prevCtx      = prevCanvas.getContext('2d');
 
-    let imgBitmap, imgW, imgH;
+    // Sync sliders & number inputs
+    [[thrRange, thrNum],[minRange,minNum],[maxRange,maxNum]].forEach(([r,n])=>{
+      r.addEventListener('input', ()=> n.value = r.value);
+      n.addEventListener('input', ()=> r.value = n.value);
+    });
 
-    // when the user picks a file, draw original and initial mask
-    imgInput.addEventListener('change', async () => {
-      const file = imgInput.files[0];
+    // Load chosen image into origCanvas
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files[0];
       if (!file) return;
-      imgBitmap = await createImageBitmap(file);
-      imgW = imgBitmap.width;
-      imgH = imgBitmap.height;
-
-      // draw original
-      origCan.width = maskCan.width = svgCan.width = imgW;
-      origCan.height = maskCan.height = svgCan.height = imgH;
-      const octx = origCan.getContext('2d');
-      octx.clearRect(0,0,imgW,imgH);
-      octx.drawImage(imgBitmap, 0, 0);
-
-      // draw initial mask
-      drawMask(+threshCtrl.value);
+      const img = new Image();
+      img.onload = () => {
+        origCanvas.width  = img.width;
+        origCanvas.height = img.height;
+        prevCanvas.width  = img.width;
+        prevCanvas.height = img.height;
+        origCtx.drawImage(img, 0, 0);
+        prevCtx.clearRect(0, 0, prevCanvas.width, prevCanvas.height);
+        outputTa.value = '';
+      };
+      img.src = URL.createObjectURL(file);
     });
 
-    // update the displayed threshold value and redraw mask
-    threshCtrl.addEventListener('input', () => {
-      threshVal.textContent = threshCtrl.value;
-      if (imgBitmap) drawMask(+threshCtrl.value);
-    });
-
-    // function to draw binary preview
-    function drawMask(threshold) {
-      const tmp = new OffscreenCanvas(imgW, imgH);
-      const tctx = tmp.getContext('2d');
-      tctx.drawImage(imgBitmap, 0, 0);
-
-      const imgData = tctx.getImageData(0, 0, imgW, imgH);
-      const bin = new Uint8ClampedArray(imgData.data.length);
-
-      for (let i = 0; i < imgW * imgH; i++) {
-        const r = imgData.data[4*i], g = imgData.data[4*i+1], b = imgData.data[4*i+2];
-        const gray = (r + g + b)/3;
-        const v = gray < threshold ? 0 : 255;  // black on white
-        bin[4*i]   = v;
-        bin[4*i+1] = v;
-        bin[4*i+2] = v;
-        bin[4*i+3] = 255;
+    // Helper: produce a binary-thresholded canvas copy
+    function getBinaryCanvas() {
+      const w = origCanvas.width, h = origCanvas.height;
+      const imgData = origCtx.getImageData(0, 0, w, h);
+      const buf     = imgData.data;
+      const t       = +thrRange.value;
+      for (let i = 0; i < buf.length; i += 4) {
+        const lum = 0.299*buf[i] + 0.587*buf[i+1] + 0.114*buf[i+2];
+        const b   = lum < t ? 0 : 255;
+        buf[i] = buf[i+1] = buf[i+2] = b;
+        buf[i+3] = 255;
       }
-
-      const mctx = maskCan.getContext('2d');
-      mctx.clearRect(0,0,imgW,imgH);
-      mctx.putImageData(new ImageData(bin, imgW, imgH), 0, 0);
+      const tmp = document.createElement('canvas');
+      tmp.width = w; tmp.height = h;
+      tmp.getContext('2d').putImageData(imgData, 0, 0);
+      return tmp;
     }
 
-    // on convert: run Potrace on the binary and draw curves + Desmos strings
-    btn.addEventListener('click', async () => {
-      if (!imgBitmap) return alert('Please select an image first!');
-      const threshold = +threshCtrl.value;
-      const w = imgW, h = imgH;
-
-      // rebuild the same binary array from the mask
-      const tctx = maskCan.getContext('2d');
-      const maskData = tctx.getImageData(0,0,w,h).data;
-      const bitmap = new Uint8Array(w*h);
-      for (let i = 0; i < w*h; i++) {
-        // 0 = black pixel, 255 = white background
-        bitmap[i] = maskData[4*i] === 0 ? 1 : 0;
+    // Preview: trace & draw vector result
+    previewBtn.addEventListener('click', async () => {
+      previewBtn.disabled = true;
+      try {
+        const binCanvas = getBinaryCanvas();
+        const svgString = await potrace(binCanvas, { pathonly: true });
+        // Draw SVG path onto prevCanvas
+        prevCtx.clearRect(0,0,prevCanvas.width, prevCanvas.height);
+        const doc = new DOMParser()
+                      .parseFromString(svgString, 'image/svg+xml');
+        const pathD = doc.querySelector('path').getAttribute('d');
+        prevCtx.stroke(new Path2D(pathD));
+      } catch (err) {
+        alert('Preview failed: ' + err);
+      } finally {
+        previewBtn.disabled = false;
       }
+    });
 
-      // run Potrace
-      const tracer = new Potrace();
-      tracer.setParameter({ threshold });
-      tracer.loadBitmap(bitmap, w, h);
-      tracer.process();
+    // Convert: extract cubic‐Bezier segments and emit Desmos functions
+    convertBtn.addEventListener('click', async () => {
+      convertBtn.disabled = true;
+      try {
+        const binCanvas = getBinaryCanvas();
+        const svgString = await potrace(binCanvas, { pathonly: true });
+        const doc       = new DOMParser()
+                              .parseFromString(svgString, 'image/svg+xml');
+        const d         = doc.querySelector('path').getAttribute('d');
 
-      // draw vector preview
-      svgCan.width = w; svgCan.height = h;
-      const sctx = svgCan.getContext('2d');
-      sctx.clearRect(0,0,w,h);
-      sctx.strokeStyle = '#000';
-      sctx.lineWidth = 1;
-      sctx.setTransform(1,0,0,-1, w/2, h/2);
-
-      const desmos = [];
-      for (const curve of tracer.getCurves()) {
-        for (const seg of curve) {
-          const [p0,p1,p2,p3] = seg;
-          sctx.beginPath();
-          sctx.moveTo(p0.x, p0.y);
-          sctx.bezierCurveTo(p1.x,p1.y, p2.x,p2.y, p3.x,p3.y);
-          sctx.stroke();
-
-          const Bx = `(1-t)^3*${p0.x.toFixed(2)} + 3*(1-t)^2*t*${p1.x.toFixed(2)} + 3*(1-t)*t^2*${p2.x.toFixed(2)} + t^3*${p3.x.toFixed(2)}`;
-          const By = `(1-t)^3*${p0.y.toFixed(2)} + 3*(1-t)^2*t*${p1.y.toFixed(2)} + 3*(1-t)*t^2*${p2.y.toFixed(2)} + t^3*${p3.y.toFixed(2)}`;
-          desmos.push(`(${Bx}, ${By}) \\left\\{0 \\le t \\le 1\\right\\}`);
+        // Parse successive C commands, track start/end points
+        const segs = [];
+        let prevX = 0, prevY = 0;
+        const mMatch = /^M\s*([\d.]+)[ ,]([\d.]+)/.exec(d);
+        if (mMatch) {
+          prevX = +mMatch[1];
+          prevY = +mMatch[2];
         }
-      }
+        const re = /C\s*([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)[ ,]([\d.-]+)/g;
+        let m;
+        while ((m = re.exec(d)) !== null) {
+          const [ , x1, y1, x2, y2, x3, y3 ] = m.map((v,i) => i>0 ? +v : v);
+          const x0 = prevX, y0 = prevY;
+          // Apply length filtering
+          const len = Math.hypot(x3-x0, y3-y0);
+          if (len >= +minRange.value && len <= +maxRange.value) {
+            segs.push(
+              `((1-t)**3*${x0} + 3*(1-t)**2*t*${x1} + 3*(1-t)*t**2*${x2} + t**3*${x3}, ` +
+              `(1-t)**3*${y0} + 3*(1-t)**2*t*${y1} + 3*(1-t)*t**2*${y2} + t**3*${y3}) \left\{0 \le t \le 1\right\}`
+            );
+          }
+          prevX = +x3; prevY = +y3;
+        }
+        outputTa.value = segs.join('\n');
 
-      outTA.value = desmos.join('\n');
+      } catch (err) {
+        alert('Conversion failed: ' + err);
+      } finally {
+        convertBtn.disabled = false;
+      }
     });
   </script>
 </body>
