@@ -1,0 +1,47 @@
+name: Precompute Bézier Data
+
+on:
+  push:
+    branches: [ main ]
+    # don’t re-run when only our outputs change
+    paths-ignore:
+      - 'segments/**'
+      - 'previews/**'
+
+permissions:
+  contents: write
+
+jobs:
+  precompute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with: fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with: python-version: '3.x'
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y potrace libpotrace-dev
+
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Run precompute script
+        run: python scripts/precompute.py
+
+      - name: Commit & push generated assets
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add segments previews
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: precompute Bézier data & previews"
+            git push
+          else
+            echo "⚙️  Nothing to commit"
+          fi
