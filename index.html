@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Desmos Bézier Exporter</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Desmos Bézier Exporter (with Preview)</title>
   <style>
     body { font-family: sans-serif; margin: 1em; }
-    form > label { display:inline-block; width:90px; }
-    input[type=number] { width:4em; }
+    .controls { margin-bottom: 1em; }
     .preview-area {
       display: flex;
       gap: 1rem;
@@ -18,90 +18,170 @@
       border: 1px solid #ccc;
       min-height: 300px;
       display: flex;
+      flex-direction: column;
       align-items: center;
-      justify-content: center;
       background: #fafafa;
+      padding: 0.5em;
+      box-sizing: border-box;
     }
-    .preview-box img {
+    .preview-box canvas {
+      flex: 1;
       max-width: 100%;
       max-height: 100%;
       object-fit: contain;
     }
-    #output {
+    .preview-box label {
+      margin-top: 0.5em;
+      font-weight: bold;
+    }
+    textarea {
       width: 100%;
-      box-sizing: border-box;
-      margin-top: 1em;
+      height: 10em;
       font-family: monospace;
+      margin-top: 1em;
     }
   </style>
 </head>
 <body>
   <h1>Desmos Bézier Exporter</h1>
-  <form id="uploadForm" enctype="multipart/form-data">
-    <label>Image:</label>
-    <input type="file" name="image" accept="image/*" required><br>
 
-    <label>Threshold:</label>
-    <input type="range" name="threshold" min="0" max="255" value="128"
-           oninput="this.nextElementSibling.value=this.value">
-    <input type="number" min="0" max="255" value="128"><br>
-
-    <label>Min Length:</label>
-    <input type="range" name="minLength" min="0" max="500" value="0"
-           oninput="this.nextElementSibling.value=this.value">
-    <input type="number" min="0" max="500" value="0"><br>
-
-    <label>Max Length:</label>
-    <input type="range" name="maxLength" min="0" max="2000" value="1000"
-           oninput="this.nextElementSibling.value=this.value">
-    <input type="number" min="0" max="2000" value="1000"><br>
-
-    <button type="submit">Convert</button>
-  </form>
+  <div class="controls">
+    <input type="file" id="image" accept="image/*"><br>
+    <label>
+      Threshold:
+      <input type="range" id="threshold" min="0" max="255" value="128">
+      <span id="threshVal">128</span>
+    </label>
+    <button id="convert">Convert</button>
+  </div>
 
   <div class="preview-area">
     <div class="preview-box">
-      <img id="origImg" alt="Original">
+      <canvas id="origCanvas"></canvas>
+      <label>Original</label>
     </div>
     <div class="preview-box">
-      <img id="previewImg" alt="Preview">
+      <canvas id="maskCanvas"></canvas>
+      <label>Binarized Preview</label>
+    </div>
+    <div class="preview-box">
+      <canvas id="svgCanvas"></canvas>
+      <label>Vector Preview</label>
     </div>
   </div>
 
   <h2>Desmos Functions</h2>
-  <textarea id="output" rows="10" readonly></textarea>
+  <textarea id="output" readonly></textarea>
 
-  <script>
-    const form = document.getElementById('uploadForm'),
-          orig = document.getElementById('origImg'),
-          prev = document.getElementById('previewImg'),
-          out  = document.getElementById('output');
+  <script type="module">
+    import Potrace from 'https://cdn.skypack.dev/potrace-wasm';
 
-    // keep slider + number in sync
-    form.querySelectorAll('input[type=range]').forEach(r => {
-      const n = r.nextElementSibling;
-      r.addEventListener('input', () => n.value = r.value);
-      n.addEventListener('input', () => r.value = n.value);
+    const imgInput   = document.getElementById('image');
+    const threshCtrl = document.getElementById('threshold');
+    const threshVal  = document.getElementById('threshVal');
+    const btn        = document.getElementById('convert');
+
+    const origCan    = document.getElementById('origCanvas');
+    const maskCan    = document.getElementById('maskCanvas');
+    const svgCan     = document.getElementById('svgCanvas');
+    const outTA      = document.getElementById('output');
+
+    let imgBitmap, imgW, imgH;
+
+    // when the user picks a file, draw original and initial mask
+    imgInput.addEventListener('change', async () => {
+      const file = imgInput.files[0];
+      if (!file) return;
+      imgBitmap = await createImageBitmap(file);
+      imgW = imgBitmap.width;
+      imgH = imgBitmap.height;
+
+      // draw original
+      origCan.width = maskCan.width = svgCan.width = imgW;
+      origCan.height = maskCan.height = svgCan.height = imgH;
+      const octx = origCan.getContext('2d');
+      octx.clearRect(0,0,imgW,imgH);
+      octx.drawImage(imgBitmap, 0, 0);
+
+      // draw initial mask
+      drawMask(+threshCtrl.value);
     });
 
-    // show the selected image immediately
-    form.image.addEventListener('change', e => {
-      const f = e.target.files[0];
-      if (f) orig.src = URL.createObjectURL(f);
+    // update the displayed threshold value and redraw mask
+    threshCtrl.addEventListener('input', () => {
+      threshVal.textContent = threshCtrl.value;
+      if (imgBitmap) drawMask(+threshCtrl.value);
     });
 
-    // submit form → /process
-    form.addEventListener('submit', async e => {
-      e.preventDefault();
-      const data = new FormData(form);
-      const res  = await fetch('/process', { method: 'POST', body: data });
-      const json = await res.json();
+    // function to draw binary preview
+    function drawMask(threshold) {
+      const tmp = new OffscreenCanvas(imgW, imgH);
+      const tctx = tmp.getContext('2d');
+      tctx.drawImage(imgBitmap, 0, 0);
 
-      // json.segments is [ [Bx, By], [Bx, By], … ]
-      output.value = json.segments.join('\n');
+      const imgData = tctx.getImageData(0, 0, imgW, imgH);
+      const bin = new Uint8ClampedArray(imgData.data.length);
 
-      // render the returned PNG preview
-      prev.src = 'data:image/png;base64,' + json.preview;
+      for (let i = 0; i < imgW * imgH; i++) {
+        const r = imgData.data[4*i], g = imgData.data[4*i+1], b = imgData.data[4*i+2];
+        const gray = (r + g + b)/3;
+        const v = gray < threshold ? 0 : 255;  // black on white
+        bin[4*i]   = v;
+        bin[4*i+1] = v;
+        bin[4*i+2] = v;
+        bin[4*i+3] = 255;
+      }
+
+      const mctx = maskCan.getContext('2d');
+      mctx.clearRect(0,0,imgW,imgH);
+      mctx.putImageData(new ImageData(bin, imgW, imgH), 0, 0);
+    }
+
+    // on convert: run Potrace on the binary and draw curves + Desmos strings
+    btn.addEventListener('click', async () => {
+      if (!imgBitmap) return alert('Please select an image first!');
+      const threshold = +threshCtrl.value;
+      const w = imgW, h = imgH;
+
+      // rebuild the same binary array from the mask
+      const tctx = maskCan.getContext('2d');
+      const maskData = tctx.getImageData(0,0,w,h).data;
+      const bitmap = new Uint8Array(w*h);
+      for (let i = 0; i < w*h; i++) {
+        // 0 = black pixel, 255 = white background
+        bitmap[i] = maskData[4*i] === 0 ? 1 : 0;
+      }
+
+      // run Potrace
+      const tracer = new Potrace();
+      tracer.setParameter({ threshold });
+      tracer.loadBitmap(bitmap, w, h);
+      tracer.process();
+
+      // draw vector preview
+      svgCan.width = w; svgCan.height = h;
+      const sctx = svgCan.getContext('2d');
+      sctx.clearRect(0,0,w,h);
+      sctx.strokeStyle = '#000';
+      sctx.lineWidth = 1;
+      sctx.setTransform(1,0,0,-1, w/2, h/2);
+
+      const desmos = [];
+      for (const curve of tracer.getCurves()) {
+        for (const seg of curve) {
+          const [p0,p1,p2,p3] = seg;
+          sctx.beginPath();
+          sctx.moveTo(p0.x, p0.y);
+          sctx.bezierCurveTo(p1.x,p1.y, p2.x,p2.y, p3.x,p3.y);
+          sctx.stroke();
+
+          const Bx = `(1-t)^3*${p0.x.toFixed(2)} + 3*(1-t)^2*t*${p1.x.toFixed(2)} + 3*(1-t)*t^2*${p2.x.toFixed(2)} + t^3*${p3.x.toFixed(2)}`;
+          const By = `(1-t)^3*${p0.y.toFixed(2)} + 3*(1-t)^2*t*${p1.y.toFixed(2)} + 3*(1-t)*t^2*${p2.y.toFixed(2)} + t^3*${p3.y.toFixed(2)}`;
+          desmos.push(`(${Bx}, ${By}) \\left\\{0 \\le t \\le 1\\right\\}`);
+        }
+      }
+
+      outTA.value = desmos.join('\n');
     });
   </script>
 </body>
