@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Desmos Bézier Exporter</title>
+  <style>
+    body { font-family: sans-serif; margin: 1em; }
+    form > label { display:inline-block; width:90px; }
+    input[type=number] { width:4em; }
+    .preview-area {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-top: 1em;
+    }
+    .preview-box {
+      flex: 1 1 300px;
+      border: 1px solid #ccc;
+      min-height: 300px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fafafa;
+    }
+    .preview-box img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    #output {
+      width: 100%;
+      box-sizing: border-box;
+      margin-top: 1em;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Desmos Bézier Exporter</h1>
+  <form id="uploadForm" enctype="multipart/form-data">
+    <label>Image:</label>
+    <input type="file" name="image" accept="image/*" required><br>
+
+    <label>Threshold:</label>
+    <input type="range" name="threshold" min="0" max="255" value="128"
+           oninput="this.nextElementSibling.value=this.value">
+    <input type="number" min="0" max="255" value="128"><br>
+
+    <label>Min Length:</label>
+    <input type="range" name="minLength" min="0" max="500" value="0"
+           oninput="this.nextElementSibling.value=this.value">
+    <input type="number" min="0" max="500" value="0"><br>
+
+    <label>Max Length:</label>
+    <input type="range" name="maxLength" min="0" max="2000" value="1000"
+           oninput="this.nextElementSibling.value=this.value">
+    <input type="number" min="0" max="2000" value="1000"><br>
+
+    <button type="submit">Convert</button>
+
+    <button type="submit">Preview</button>
+  </form>
+
+  <div class="preview-area">
+    <div class="preview-box">
+      <img id="origImg" alt="Original">
+    </div>
+    <div class="preview-box">
+      <img id="previewImg" alt="Preview">
+    </div>
+  </div>
+
+  <h2>Desmos Functions</h2>
+  <textarea id="output" rows="10" readonly></textarea>
+
+  <script>
+    const form = document.getElementById('uploadForm'),
+          orig = document.getElementById('origImg'),
+          prev = document.getElementById('previewImg'),
+          out  = document.getElementById('output');
+
+    // keep slider + number in sync
+    form.querySelectorAll('input[type=range]').forEach(r => {
+      const n = r.nextElementSibling;
+      r.addEventListener('input', () => n.value = r.value);
+      n.addEventListener('input', () => r.value = n.value);
+    });
+
+    // show the selected image immediately
+    form.image.addEventListener('change', e => {
+      const f = e.target.files[0];
+      if (f) orig.src = URL.createObjectURL(f);
+    });
+
+    // submit form → /process
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const data = new FormData(form);
+      const res  = await fetch('/process', { method: 'POST', body: data });
+      const json = await res.json();
+
+      // json.segments is [ [Bx, By], [Bx, By], … ]
+      output.value = json.segments.join('\n');
+
+      // render the returned PNG preview
+      prev.src = 'data:image/png;base64,' + json.preview;
+    });
+  </script>
+</body>
+</html>
