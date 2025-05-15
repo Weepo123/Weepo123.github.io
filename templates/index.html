@@ -44,21 +44,22 @@
     <label>Threshold:</label>
     <input type="range" name="threshold" min="0" max="255" value="128"
            oninput="this.nextElementSibling.value=this.value">
-    <input type="number" min="0" max="255" value="128"><br>
+    <input type="number" name="thresholdVal" min="0" max="255" value="128"><br>
 
     <label>Min Length:</label>
     <input type="range" name="minLength" min="0" max="500" value="0"
            oninput="this.nextElementSibling.value=this.value">
-    <input type="number" min="0" max="500" value="0"><br>
+    <input type="number" name="minLengthVal" min="0" max="500" value="0"><br>
 
     <label>Max Length:</label>
     <input type="range" name="maxLength" min="0" max="2000" value="1000"
            oninput="this.nextElementSibling.value=this.value">
-    <input type="number" min="0" max="2000" value="1000"><br>
+    <input type="number" name="maxLengthVal" min="0" max="2000" value="1000"><br>
 
+    <!-- added Preview button -->
+    <button type="button" id="previewBtn">Preview</button>
+    <!-- existing Convert button -->
     <button type="submit">Convert</button>
-
-    <button type="submit">Preview</button>
   </form>
 
   <div class="preview-area">
@@ -74,10 +75,11 @@
   <textarea id="output" rows="10" readonly></textarea>
 
   <script>
-    const form = document.getElementById('uploadForm'),
-          orig = document.getElementById('origImg'),
-          prev = document.getElementById('previewImg'),
-          out  = document.getElementById('output');
+    const form      = document.getElementById('uploadForm'),
+          orig      = document.getElementById('origImg'),
+          prev      = document.getElementById('previewImg'),
+          out       = document.getElementById('output'),
+          previewBtn= document.getElementById('previewBtn');
 
     // keep slider + number in sync
     form.querySelectorAll('input[type=range]').forEach(r => {
@@ -92,17 +94,30 @@
       if (f) orig.src = URL.createObjectURL(f);
     });
 
-    // submit form → /process
+    // PREVIEW only: hit /preview and update the right‐hand image
+    previewBtn.addEventListener('click', async () => {
+      const data = new FormData(form);
+      const res  = await fetch('/process', { method:'POST', body: data });
+      if (!res.ok) {
+        alert('Preview failed: ' + res.statusText);
+        return;
+      }
+      const json = await res.json();
+      // update just the preview image
+      prev.src = 'data:image/png;base64,' + json.preview;
+    });
+
+    // CONVERT: hit /process (or /convert) and populate both preview+functions
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const data = new FormData(form);
       const res  = await fetch('/process', { method: 'POST', body: data });
       const json = await res.json();
 
-      // json.segments is [ [Bx, By], [Bx, By], … ]
+      // update function list
       output.value = json.segments.join('\n');
 
-      // render the returned PNG preview
+      // and also update preview in case you want
       prev.src = 'data:image/png;base64,' + json.preview;
     });
   </script>

@@ -63,16 +63,16 @@ def process_image(image_path, threshold=128, min_length=0, max_length=float('inf
             preview_curves.append(np.array(pts_pixel))
 
             Bx = (
-                f"(1-t)**3*{pts_pixel[0][0]}"
-                f" + 3*(1-t)**2*t*{pts_pixel[1][0]}"
-                f" + 3*(1-t)*t**2*{pts_pixel[2][0]}"
-                f" + t**3*{pts_pixel[3][0]}"
+                f"(1-t)^3*{pts_pixel[0][0]}"
+                f"+3*(1-t)^2*t*{pts_pixel[1][0]}"
+                f"+3*(1-t)*t^2*{pts_pixel[2][0]}"
+                f"+t^3*{pts_pixel[3][0]}"
             )
             By = (
-                f"(1-t)**3*{pts_pixel[0][1]}"
-                f" + 3*(1-t)**2*t*{pts_pixel[1][1]}"
-                f" + 3*(1-t)*t**2*{pts_pixel[2][1]}"
-                f" + t**3*{pts_pixel[3][1]}"
+                f"(1-t)^3*{pts_pixel[0][1]}"
+                f"+3*(1-t)^2*t*{pts_pixel[1][1]}"
+                f"+3*(1-t)*t^2*{pts_pixel[2][1]}"
+                f"+t^3*{pts_pixel[3][1]}"
             )
             domain = r"\left\{0 \le t \le 1\right\}"
             desmos_segments.append(f"({Bx}, {By}) {domain}")
@@ -124,4 +124,4 @@ def process():
     return jsonify({ 'segments': segments, 'preview': preview_b64 })
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0',debug=True)
